@@ -28,7 +28,7 @@ app.add_middleware(
 # Load reference embeddings
 reference_encodings = {}
 for file in os.listdir("users"):
-    if file.endswith(".jpg") or file.endswith(".png"):
+    if file.endswith(".jpg") or file.endswith(".png") or file.endswith(".jpeg"):
         img = face_recognition.load_image_file(f"users/{file}")
         enc = face_recognition.face_encodings(img)[0]
         user_id = os.path.splitext(file)[0]

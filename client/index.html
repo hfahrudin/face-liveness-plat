@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Facial Biometric Authentication - Low-Fid Prototype</title>
+    <style>
+        #webcam {
+            border: 1px solid black;
+        }
+        #overlay {
+            position: absolute;
+            border: 2px solid red;
+            pointer-events: none;
+        }
+        #container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+        }
+        #user-select {
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Facial Biometric Authentication - Low-Fid Prototype</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+        }
+
+        #main-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #webcam {
+            border: 1px solid black;
+        }
+
+        #overlay {
+            position: absolute;
+            border: 2px solid red;
+            pointer-events: none;
+        }
+
+        #container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            margin-top: 10px;
+        }
+
+        #user-select {
+            margin-bottom: 10px;
+        }
+
+        #start-btn {
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div id="main-container">
+        <h1>Web Face Authentication</h1>
+
+        <!-- Dropdown for user selection -->
+        <div>
+            <label for="user-select">Select User:</label>
+            <select id="user-select">
+                <option value="">Loading users...</option>
+            </select>
+            <button id="start-btn">Start Authentication</button>
+        </div>
+
+        <div id="container">
+            <video id="webcam" width="640" height="480" autoplay></video>
+            <div id="overlay"></div>
+        </div>
+
+        <p id="status">Press Start Authentication</p>
+    </div>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const overlay = document.getElementById('overlay');
+        const status = document.getElementById('status');
+        const userSelect = document.getElementById('user-select');
+
+        let selectedUserId = null;
+
+        // Update selected user ID when dropdown changes
+        userSelect.addEventListener('change', () => {
+            selectedUserId = userSelect.value;
+        });
+
+        // Webcam access
+        navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } })
+            .then(stream => { video.srcObject = stream; });
+
+        // ROI box size
+        const boxWidth = 200;
+        const boxHeight = 200;
+
+        // Position overlay in the center
+        overlay.style.width = boxWidth + 'px';
+        overlay.style.height = boxHeight + 'px';
+        overlay.style.left = ((video.width - boxWidth) / 2) + 'px';
+        overlay.style.top = ((video.height - boxHeight) / 2) + 'px';
+
+        fetch('http://localhost:8000/users')  // Make sure this endpoint exists on your backend
+            .then(response => response.json())
+            .then(users => {
+                userSelect.innerHTML = ''; // clear placeholder
+                users.forEach(user => {
+                    const option = document.createElement('option');
+                    option.value = user.id;
+                    option.text = user.id;
+                    userSelect.appendChild(option);
+                });
+                // set initial selection
+                if (users.length > 0) {
+                    selectedUserId = users[0].id;
+                }
+            })
+            .catch(err => {
+                userSelect.innerHTML = '<option value="">Failed to load users</option>';
+                console.error(err);
+            });
+
+        let ws = null;
+        document.getElementById('start-btn').addEventListener('click', () => {
+            connectWebSocket();
+        });
+
+        function connectWebSocket() {
+            if (!selectedUserId) {
+                status.innerText = "Select a user first!";
+                return;
+            }
+
+            // Close previous connection if any
+            if (ws) ws.close();
+
+            // Include selectedUserId as query parameter
+            ws = new WebSocket(`ws://localhost:8000/ws?user_id=${encodeURIComponent(selectedUserId)}`);
+
+            ws.onopen = () => {
+                status.innerText = "Connected to server";
+                captureAndSend();
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.action === 'authenticated') {
+                    stopCapture(); // stop sending frames
+                    if (ws && ws.readyState === WebSocket.OPEN) {
+                        ws.close(1000, "User Authenticated"); // 1000 = Normal Closure
+                    }
+                    ws = null;
+                    status.innerText = `You are Authenticated!`;
+                } else {
+                    status.innerText = `Move slowly to the ${data.action}`;
+                }
+            };
+
+            // ws.onclose = () => {
+            //     status.innerText = "Disconnected";
+            //     ws = null; // clear reference
+            // };
+
+            ws.onerror = (err) => {
+                console.error("WebSocket error:", err);
+                status.innerText = "WebSocket error";
+            };
+        }
+
+        // When user selection changes, close the existing connection
+        userSelect.addEventListener('change', () => {
+            selectedUserId = userSelect.value;
+            stopCapture(); // stop sending frames
+            if (ws) {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.close(1000, "Client intentionally disconnecting"); // 1000 = Normal Closure
+                }
+                ws = null;
+                status.innerText = "Disconnected - Press Start Authentication";
+            }
+        });
+
+        let captureInterval = null;
+
+        function captureAndSend() {
+            // Stop any previous interval
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                captureInterval = null;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = boxWidth;
+            canvas.height = boxHeight;
+            const context = canvas.getContext('2d');
+
+            captureInterval = setInterval(() => {
+                if (!selectedUserId || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                // Crop only the box area from video
+                const sx = (video.videoWidth - boxWidth) / 2;
+                const sy = (video.videoHeight - boxHeight) / 2;
+                context.drawImage(video, sx, sy, boxWidth, boxHeight, 0, 0, boxWidth, boxHeight);
+
+                // Encode as base64 JPEG
+                const dataURL = canvas.toDataURL("image/jpeg");
+                const base64String = dataURL.split(",")[1]; // remove "data:image/jpeg;base64,"
+
+                // Send both frame and selected user ID
+                ws.send(JSON.stringify({ user_id: selectedUserId, frame: base64String }));
+            }, 200); // send ~5 fps
+        }
+
+        // Stop capture when needed
+        function stopCapture() {
+            if (captureInterval) {
+                clearInterval(captureInterval);
+                captureInterval = null;
+            }
+        }
+    </script>
+</body>
+</html>

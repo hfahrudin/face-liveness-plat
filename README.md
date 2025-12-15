@@ -1,6 +1,12 @@
-# Face Liveness Plat
+# Face Liveness Test
 
 This project is a facial biometric authentication system with a "liveness" check. It verifies a user's identity by matching their face against a registered image and ensures the user is a live person by asking them to perform a series of head movements.
+
+
+<h2 align="center">
+  <img width="40%" alt="Model2Vec logo" src="assets/1.gif"><br/>
+</h2>
+
 
 ## How It Works
 
